@@ -1,0 +1,131 @@
+in AmplifaiDataAccess
+---------------------
+
+public class DashboardNew
+    {
+        public List<access_log_v3_Result> listAccessLogV3 { get; set; }
+    }
+
+in AmplifaiBusiness
+-------------------
+
+public interface IDashboardNew
+    {
+        List<access_log_v3_Result> GetAccessLog(string companyguid, string email, string startdate, string enddate);
+    }
+
+in AmplifaiBusiness
+-------------------
+
+public class DashboardNewDetails : IDashboardNew
+    {
+        public List<access_log_v3_Result> GetAccessLog(string companyguid, string email, string startdate, string enddate)
+        {
+            Amplifaiv2DevEntities entities = new Amplifaiv2DevEntities();
+            List<access_log_v3_Result> list = new List<access_log_v3_Result>();
+            var query = "exec dbo.access_log_v3  @email,@companyguid,@startdate,@enddate,@Employeename,@module,@accessdatetime,@Accessdevice";
+            var parameters = new[]
+            {
+                new SqlParameter("@email",email),
+                new SqlParameter("@companyguid",companyguid),
+                new SqlParameter("@startdate",string.IsNullOrEmpty(startdate)?(object)DBNull.Value:Convert.ToDateTime(startdate)),
+                new SqlParameter("@enddate",string.IsNullOrEmpty(enddate)?(object)DBNull.Value:Convert.ToDateTime(enddate)),
+                new SqlParameter("@Employeename",DBNull.Value),
+                new SqlParameter("@module",DBNull.Value),
+                new SqlParameter("@accessdatetime",DBNull.Value),
+                new SqlParameter("@Accessdevice",DBNull.Value)
+            };
+            using (var multiResultSet = entities.MultiResultSetSqlQuery(query, parameters))
+            {
+                list = multiResultSet.ResultSetFor<access_log_v3_Result>().ToList();
+            }
+            return list;
+        }
+    }
+
+in DashboardNewController
+-------------------------
+
+private DashboardNew dashboardNew;
+        private IDashboardNew dashboardNewDetails;
+
+
+public ActionResult AccessLogin()
+        {
+            dashboardNew = new DashboardNew();
+            dashboardNewDetails = new DashboardNewDetails();
+            dashboardNew.listAccessLogV3 = dashboardNewDetails.GetAccessLog(Session["ComapnyGuid"].ToString(), Session["LoggedInUserEmail"].ToString(), null, null);
+            return View(dashboardNew);
+        }
+        
+        public ActionResult GetAccessLogDataToExcel(string startdate,string enddate)
+        {
+            Session["startdate"] = startdate;
+            Session["enddate"] = enddate;
+            return Json("", JsonRequestBehavior.AllowGet);
+        }
+
+        public ActionResult getAccessLogDataExcel()
+        {
+            dashboardNew = new DashboardNew();
+            dashboardNewDetails = new DashboardNewDetails();
+            dashboardNew.listAccessLogV3 = dashboardNewDetails.GetAccessLog(Session["ComapnyGuid"].ToString(), Session["LoggedInUserEmail"].ToString(), Session["startdate"].ToString(), Session["enddate"].ToString());
+            DataTable dt = new DataTable();
+            PropertyInfo[] props = typeof(DataAccess.access_log_v3_Result).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            foreach(PropertyInfo prop in props)
+            {
+                dt.Columns.Add(prop.Name);
+            }
+            foreach(var item in dashboardNew.listAccessLogV3)
+            {
+                var values = new object[props.Length];
+                for(int i=0;i<props.Length;i++)
+                {
+                    values[i] = props[i].GetValue(item, null);
+                }
+                dt.Rows.Add(values);
+            }
+            DataSet ds = new DataSet();
+            ds.Tables.Add(dt);
+            ds.Tables[0].TableName = "AccessLogV3";
+
+            DateTime date = DateTime.Now; // will give the date for today
+            string dateWithFormat = date.ToString("MMddyyyy");
+
+            string csv = ExportToCSVFilewthDoubleQotes(dt);
+            try
+            {
+                return File(new System.Text.UTF8Encoding().GetBytes(csv), "text/csv", "AmplifaiAccessLog_" + dateWithFormat + ".csv");
+            }
+            catch (Exception ex)
+            {
+                return null;
+            }
+        }
+
+
+        private string ExportToCSVFilewthDoubleQotes(DataTable dtTable)
+        {
+            StringBuilder sbldr = new StringBuilder();
+            if (dtTable.Columns.Count != 0)
+            {
+                foreach (DataColumn col in dtTable.Columns)
+                {
+                    sbldr.Append(col.ColumnName + ',');
+                }
+                sbldr.Append("\r\n");
+                foreach (DataRow row in dtTable.Rows)
+                {
+                    foreach (DataColumn column in dtTable.Columns)
+                    {
+                        string str = row[column].ToString();
+                        //string str = row[column].ToString();
+                        str = str.Replace(", ", ",");
+                        str = str.Replace("\"", "\"\"");
+                        sbldr.Append('"' + str + '"' + ',');
+                    }
+                    sbldr.Append("\r\n");
+                }
+            }
+            return sbldr.ToString();
+        }
